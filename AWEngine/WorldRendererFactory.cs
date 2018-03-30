@@ -60,6 +60,9 @@ namespace AWEngine
             LoadGroundTextures(renderer);
             LoadGroundTransitionTextures(renderer);
 
+            // Magic Offset ( \_(O.o)_/ )
+            renderer.MaskOffset = new Vector2(0f, .1f);
+
             return renderer;
         }
     }

@@ -66,6 +66,8 @@ namespace AWEngine
         protected Vector3[] tileVertexOffsets = new Vector3[TileVerts + 1];
         protected Vector2[] tileVertexMaskUVs = new Vector2[TileVerts + 1];
 
+        public Vector2 MaskOffset { get; set; }
+
         public int TransitionURCount
         {
             get { return groundTransitionMaskArrayUR.Depth; }
@@ -205,9 +207,9 @@ namespace AWEngine
                 Vector2 MaskUVOffsetLR = -new Vector2(2f * tileSize / groundTransitionMaskArrayUR.Width, (float)tileSize / groundTransitionMaskArrayUR.Height);
 
                 // Magic Offsets
-                MaskUVOffsetLL -= new Vector2(0f, -.1f);
-                MaskUVOffsetLC -= new Vector2(0f, -.1f);
-                MaskUVOffsetLR -= new Vector2(0f, -.1f);
+                MaskUVOffsetLL += MaskOffset;
+                MaskUVOffsetLC += MaskOffset;
+                MaskUVOffsetLR += MaskOffset;
 
                 // Write hexes into the temporary vertex data buffer
                 long vertLocation = 0;
