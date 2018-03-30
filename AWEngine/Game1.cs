@@ -49,13 +49,12 @@ namespace AWEngine
             WorldRendererFactory factory = new WorldRendererFactory();
             renderer = factory.CreateRenderer(GraphicsDevice, Content);
 
-            map.CreateEmptyRegion(new Position(0, 0), new Size(40, 40));
+            map.CreateEmptyRegion(new Position(0, 0), new Size(50, 50));
 
             var rand = new Random();
             foreach (var tile in map.AllTiles)
             {
                 var tileCpy = tile;
-                tileCpy.Id = 1;
                 tileCpy.TransitionUR = (byte)rand.Next(renderer.TransitionURCount);
                 tileCpy.TransitionUC = (byte)rand.Next(renderer.TransitionUCCount);
                 tileCpy.TransitionUL = (byte)rand.Next(renderer.TransitionULCount);
@@ -69,44 +68,6 @@ namespace AWEngine
                     tileRef.Id = 2;
                 }
             }
-
-            for (int x = 12; x < 20; ++x)
-            {
-                for (int y = 16; y < 20; ++y)
-                {
-                    var tileRef = map[x, y];
-                    tileRef.Id = 5;
-                }
-            }
-
-            for (int x = 1; x < 8; ++x)
-            {
-                for (int y = 16; y < 20; ++y)
-                {
-                    var tileRef = map[x, y];
-                    tileRef.Id = 4;
-                }
-            }
-
-            for (int x = 12; x < 20; ++x)
-            {
-                for (int y = 0; y < 8; ++y)
-                {
-                    var tileRef = map[x, y];
-                    tileRef.Id = 7;
-                }
-            }
-
-            for (int x = 8; x < 15; ++x)
-            {
-                for (int y = 8; y < 15; ++y)
-                {
-                    var tileRef = map[x, y];
-                    tileRef.Id = 9;
-                }
-            }
-
-
         }
 
         protected override void UnloadContent()

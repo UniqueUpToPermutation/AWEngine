@@ -30,7 +30,9 @@ namespace AWEngine
         public static readonly VertexDeclaration VertexDeclarationStatic = new VertexDeclaration(new VertexElement[] {
             new VertexElement(0, VertexElementFormat.Vector3, VertexElementUsage.Position, 0),
             new VertexElement(12, VertexElementFormat.Color, VertexElementUsage.Color, 0),
-            new VertexElement(16, VertexElementFormat.Vector2, VertexElementUsage.TextureCoordinate, 0)
+            new VertexElement(16, VertexElementFormat.Vector2, VertexElementUsage.TextureCoordinate, 0),
+            new VertexElement(24, VertexElementFormat.Color, VertexElementUsage.Color, 1),
+            new VertexElement(28, VertexElementFormat.Color, VertexElementUsage.Color, 2)
         });
 
         public VertexDeclaration VertexDeclaration
@@ -161,6 +163,11 @@ namespace AWEngine
             }
         }
 
+        public byte Pack(byte high, byte low)
+        {
+            return (byte)((high << 4) | (low & 0x0F));
+        }
+
         public void RenderGrid(WorldMap map)
         {
             // Collect all the tiles we need to render
@@ -214,6 +221,10 @@ namespace AWEngine
                     var tileLR = tile.GetTileInDirection(WorldDirection.SouthEast);
 
                     var colorData = new Color(tile.Id, tileLL.Id, tileLC.Id, tileLR.Id);
+                    var auxData1 = new Color(tileLC.TransitionUL, tileLC.TransitionUC, tileLC.TransitionUR,
+                        (byte)0);
+                    var auxData2 = new Color(tileLL.TransitionUC, tileLL.TransitionUR, 
+                        tileLR.TransitionUC, tileLR.TransitionUL);
 
                     for (int iTriangle = 0; iTriangle < TileVerts; ++iTriangle)
                     {
@@ -225,18 +236,24 @@ namespace AWEngine
                         gridVertexData[vertLocation].Position = v2;
                         gridVertexData[vertLocation].ByteData = colorData;
                         gridVertexData[vertLocation].MaskUV = v2_uv;
+                        gridVertexData[vertLocation].Aux1 = auxData1;
+                        gridVertexData[vertLocation].Aux2 = auxData2;
 
                         ++vertLocation;
 
                         gridVertexData[vertLocation].Position = v1;
                         gridVertexData[vertLocation].ByteData = colorData;
                         gridVertexData[vertLocation].MaskUV = v1_uv;
+                        gridVertexData[vertLocation].Aux1 = auxData1;
+                        gridVertexData[vertLocation].Aux2 = auxData2;
 
                         ++vertLocation;
 
                         gridVertexData[vertLocation].Position = center;
                         gridVertexData[vertLocation].ByteData = colorData;
                         gridVertexData[vertLocation].MaskUV = centerMaskUV;
+                        gridVertexData[vertLocation].Aux1 = auxData1;
+                        gridVertexData[vertLocation].Aux2 = auxData2;
 
                         ++vertLocation;
                     }
@@ -246,11 +263,14 @@ namespace AWEngine
                 Matrix Proj = GetProjection(CurrentCamera);
                 View = Matrix.Transpose(View);
 
-                gridEffect.Parameters["View"]?.SetValue(View);
-                gridEffect.Parameters["Projection"]?.SetValue(Proj);
-                gridEffect.Parameters["TextureSize"]?.SetValue(new Vector3(groundTextureArray.Width,
+                gridEffect.Parameters["View"].SetValue(View);
+                gridEffect.Parameters["Projection"].SetValue(Proj);
+                gridEffect.Parameters["TextureSize"].SetValue(new Vector3(groundTextureArray.Width,
                     groundTextureArray.Height,
                     groundTextureArray.Depth));
+                gridEffect.Parameters["TransMaskURCount"].SetValue((float)TransitionURCount);
+                gridEffect.Parameters["TransMaskUCCount"].SetValue((float)TransitionUCCount);
+                gridEffect.Parameters["TransMaskULCount"].SetValue((float)TransitionULCount);
                 gridEffect.Parameters["GroundSampler"]?.SetValue(groundTextureArray);
                 gridEffect.Parameters["TransMaskUR"]?.SetValue(groundTransitionMaskArrayUR);
                 gridEffect.Parameters["TransMaskUC"]?.SetValue(groundTransitionMaskArrayUC);
