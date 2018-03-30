@@ -65,7 +65,43 @@ namespace AWEngine
                 for (int y = 3; y < 10; ++y)
                 {
                     var tileRef = map[x, y];
+                    tileRef.Id = 1;
+                }
+            }
+
+            for (int x = 14; x < 25; ++x)
+            {
+                for (int y = 2; y < 8; ++y)
+                {
+                    var tileRef = map[x, y];
                     tileRef.Id = 2;
+                }
+            }
+
+            for (int x = 6; x < 15; ++x)
+            {
+                for (int y = 8; y < 14; ++y)
+                {
+                    var tileRef = map[x, y];
+                    tileRef.Id = 3;
+                }
+            }
+
+            for (int x = 2; x < 7; ++x)
+            {
+                for (int y = 10; y < 18; ++y)
+                {
+                    var tileRef = map[x, y];
+                    tileRef.Id = 5;
+                }
+            }
+
+            for (int x = 13; x < 27; ++x)
+            {
+                for (int y = 12; y < 17; ++y)
+                {
+                    var tileRef = map[x, y];
+                    tileRef.Id = 7;
                 }
             }
         }
