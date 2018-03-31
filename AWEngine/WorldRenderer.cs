@@ -19,7 +19,7 @@ using AoWGraphics;
 namespace AWEngine
 {
     [StructLayout(LayoutKind.Sequential)]
-    struct GridVertex : IVertexType
+    struct GridVertexOnePass : IVertexType
     {
         public Vector3 Position;
         public Color ByteData;
@@ -44,15 +44,85 @@ namespace AWEngine
         }
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    struct GridVertexSimple : IVertexType
+    {
+        public Vector3 Position;
+        public Color ByteData;
+
+        public static readonly VertexDeclaration VertexDeclarationStatic = new VertexDeclaration(new VertexElement[] {
+            new VertexElement(0, VertexElementFormat.Vector3, VertexElementUsage.Position, 0),
+            new VertexElement(12, VertexElementFormat.Color, VertexElementUsage.Color, 0),
+        });
+
+        public VertexDeclaration VertexDeclaration
+        {
+            get
+            {
+                return VertexDeclarationStatic;
+            }
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct GridVertexSimpleAux : IVertexType
+    {
+        public Vector3 Position;
+        public Color ByteData;
+        public Vector2 MaskUV;
+        public Color Aux1;
+
+        public static readonly VertexDeclaration VertexDeclarationStatic = new VertexDeclaration(new VertexElement[] {
+            new VertexElement(0, VertexElementFormat.Vector3, VertexElementUsage.Position, 0),
+            new VertexElement(12, VertexElementFormat.Color, VertexElementUsage.Color, 0),
+            new VertexElement(16, VertexElementFormat.Vector2, VertexElementUsage.TextureCoordinate, 0),
+            new VertexElement(24, VertexElementFormat.Color, VertexElementUsage.Color, 1),
+        });
+
+        public VertexDeclaration VertexDeclaration
+        {
+            get
+            {
+                return VertexDeclarationStatic;
+            }
+        }
+    }
+
+    public class TileComparer : IComparer<TileRef>
+    {
+        // Call CaseInsensitiveComparer.Compare with the parameters reversed.
+        public int Compare(TileRef A, TileRef B)
+        {
+            return A.LeftUnscaled.Y - B.LeftUnscaled.Y;
+        }
+    }
+
     class Camera
     {
         public Vector2 Position;
         public float Scale = 1f;
     }
 
+    struct TileTransitionDraw
+    {
+        public const byte DrawFlagUR = 0x1;
+        public const byte DrawFlagUR_Special = 0x2;
+        public const byte DrawFlagUC = 0x4;
+        public const byte DrawFlagUC_Special = 0x8;
+        public const byte DrawFlagUL = 0x10;
+        public const byte DrawFlagUL_Special = 0x20;
+
+        public TileRef BaseTile;
+        public TileRef TileUR;
+        public TileRef TileUC;
+        public TileRef TileUL;
+        public byte DrawFlags;
+    }
+
     class WorldRenderer : Renderer
     {
-        public const string GridEffectSrc = "Effects\\Grid";
+        public const string GridEffectOnePassSrc = "Effects\\GridOnePass";
+        public const string GridEffectSimpleSrc = "Effects\\GridSimple";
         public const double BufferOversizeFactor = 1.5f;
         public const int TileVerts = 6;
 
@@ -61,10 +131,20 @@ namespace AWEngine
         protected Texture3D groundTransitionMaskArrayUC;
         protected Texture3D groundTransitionMaskArrayUL;
 
-        protected Effect gridEffect;
-        protected GridVertex[] gridVertexData;
+        protected Effect gridOnePassEffect;
+        protected Effect gridSimpleEffect;
+        protected TileComparer tileComparer = new TileComparer();
+
+        protected GridVertexOnePass[] gridVertexDataOnePass;
+        protected GridVertexSimple[] gridVertexDataSimple;
+        protected GridVertexSimpleAux[] gridVertexDataTransition;
         protected Vector3[] tileVertexOffsets = new Vector3[TileVerts + 1];
         protected Vector2[] tileVertexMaskUVs = new Vector2[TileVerts + 1];
+        protected TileRef[] tileRefCache;
+        protected TileTransitionDraw[] tileTransitionDrawCache;
+        protected Vector3[] transitionHexPositionOffsets = new Vector3[4];
+        protected byte[] transitionHexDrawFlags = new byte[4];
+        protected TileRef[] tileRefsTemp = new TileRef[4];
 
         public Vector2 MaskOffset { get; set; }
 
@@ -89,7 +169,8 @@ namespace AWEngine
 
         public void LoadContent(ContentManager content)
         {
-            gridEffect = content.Load<Effect>(GridEffectSrc);
+            gridOnePassEffect = content.Load<Effect>(GridEffectOnePassSrc);
+            gridSimpleEffect = content.Load<Effect>(GridEffectSimpleSrc);
         }
 
         public void CreateGroundTransitionArrays(IEnumerable<System.Drawing.Bitmap> bitmapsUR,
@@ -170,7 +251,7 @@ namespace AWEngine
             return (byte)((high << 4) | (low & 0x0F));
         }
 
-        public void RenderGrid(WorldMap map)
+        public void RenderGridOnePass(WorldMap map)
         {
             // Collect all the tiles we need to render
             var visRect = GetVisibilityRect(CurrentCamera);
@@ -183,8 +264,8 @@ namespace AWEngine
             if (hexCount > 0)
             {
                 // Create new vertex data buffer if existing one isn't large enough
-                if (gridVertexData == null || gridVertexData.LongLength < requiredLength)
-                    gridVertexData = new GridVertex[(long)(requiredLength * BufferOversizeFactor)];
+                if (gridVertexDataOnePass == null || gridVertexDataOnePass.LongLength < requiredLength)
+                    gridVertexDataOnePass = new GridVertexOnePass[(long)(requiredLength * BufferOversizeFactor)];
 
                 // Compute offsets of the corner vertices of the tile
                 var tileSize = map.TileSize;
@@ -225,7 +306,7 @@ namespace AWEngine
                     var colorData = new Color(tile.Id, tileLL.Id, tileLC.Id, tileLR.Id);
                     var auxData1 = new Color(tileLC.TransitionUL, tileLC.TransitionUC, tileLC.TransitionUR,
                         (byte)0);
-                    var auxData2 = new Color(tileLL.TransitionUC, tileLL.TransitionUR, 
+                    var auxData2 = new Color(tileLL.TransitionUC, tileLL.TransitionUR,
                         tileLR.TransitionUC, tileLR.TransitionUL);
 
                     for (int iTriangle = 0; iTriangle < TileVerts; ++iTriangle)
@@ -235,27 +316,27 @@ namespace AWEngine
                         var v1_uv = tileVertexMaskUVs[iTriangle + 1];
                         var v2_uv = tileVertexMaskUVs[iTriangle];
 
-                        gridVertexData[vertLocation].Position = v2;
-                        gridVertexData[vertLocation].ByteData = colorData;
-                        gridVertexData[vertLocation].MaskUV = v2_uv;
-                        gridVertexData[vertLocation].Aux1 = auxData1;
-                        gridVertexData[vertLocation].Aux2 = auxData2;
+                        gridVertexDataOnePass[vertLocation].Position = v2;
+                        gridVertexDataOnePass[vertLocation].ByteData = colorData;
+                        gridVertexDataOnePass[vertLocation].MaskUV = v2_uv;
+                        gridVertexDataOnePass[vertLocation].Aux1 = auxData1;
+                        gridVertexDataOnePass[vertLocation].Aux2 = auxData2;
 
                         ++vertLocation;
 
-                        gridVertexData[vertLocation].Position = v1;
-                        gridVertexData[vertLocation].ByteData = colorData;
-                        gridVertexData[vertLocation].MaskUV = v1_uv;
-                        gridVertexData[vertLocation].Aux1 = auxData1;
-                        gridVertexData[vertLocation].Aux2 = auxData2;
+                        gridVertexDataOnePass[vertLocation].Position = v1;
+                        gridVertexDataOnePass[vertLocation].ByteData = colorData;
+                        gridVertexDataOnePass[vertLocation].MaskUV = v1_uv;
+                        gridVertexDataOnePass[vertLocation].Aux1 = auxData1;
+                        gridVertexDataOnePass[vertLocation].Aux2 = auxData2;
 
                         ++vertLocation;
 
-                        gridVertexData[vertLocation].Position = center;
-                        gridVertexData[vertLocation].ByteData = colorData;
-                        gridVertexData[vertLocation].MaskUV = centerMaskUV;
-                        gridVertexData[vertLocation].Aux1 = auxData1;
-                        gridVertexData[vertLocation].Aux2 = auxData2;
+                        gridVertexDataOnePass[vertLocation].Position = center;
+                        gridVertexDataOnePass[vertLocation].ByteData = colorData;
+                        gridVertexDataOnePass[vertLocation].MaskUV = centerMaskUV;
+                        gridVertexDataOnePass[vertLocation].Aux1 = auxData1;
+                        gridVertexDataOnePass[vertLocation].Aux2 = auxData2;
 
                         ++vertLocation;
                     }
@@ -265,22 +346,22 @@ namespace AWEngine
                 Matrix Proj = GetProjection(CurrentCamera);
                 View = Matrix.Transpose(View);
 
-                gridEffect.Parameters["View"].SetValue(View);
-                gridEffect.Parameters["Projection"].SetValue(Proj);
-                gridEffect.Parameters["TextureSize"].SetValue(new Vector3(groundTextureArray.Width,
+                gridOnePassEffect.Parameters["View"].SetValue(View);
+                gridOnePassEffect.Parameters["Projection"].SetValue(Proj);
+                gridOnePassEffect.Parameters["TextureSize"].SetValue(new Vector3(groundTextureArray.Width,
                     groundTextureArray.Height,
                     groundTextureArray.Depth));
-                gridEffect.Parameters["TransMaskURCount"].SetValue((float)TransitionURCount);
-                gridEffect.Parameters["TransMaskUCCount"].SetValue((float)TransitionUCCount);
-                gridEffect.Parameters["TransMaskULCount"].SetValue((float)TransitionULCount);
-                gridEffect.Parameters["GroundSampler"]?.SetValue(groundTextureArray);
-                gridEffect.Parameters["TransMaskUR"]?.SetValue(groundTransitionMaskArrayUR);
-                gridEffect.Parameters["TransMaskUC"]?.SetValue(groundTransitionMaskArrayUC);
-                gridEffect.Parameters["TransMaskUL"]?.SetValue(groundTransitionMaskArrayUL);
-                gridEffect.Parameters["MaskUVOffsetLL"]?.SetValue(MaskUVOffsetLL);
-                gridEffect.Parameters["MaskUVOffsetLC"]?.SetValue(MaskUVOffsetLC);
-                gridEffect.Parameters["MaskUVOffsetLR"]?.SetValue(MaskUVOffsetLR);
-                gridEffect.CurrentTechnique.Passes[0].Apply();
+                gridOnePassEffect.Parameters["TransMaskURCount"].SetValue((float)TransitionURCount);
+                gridOnePassEffect.Parameters["TransMaskUCCount"].SetValue((float)TransitionUCCount);
+                gridOnePassEffect.Parameters["TransMaskULCount"].SetValue((float)TransitionULCount);
+                gridOnePassEffect.Parameters["GroundSampler"]?.SetValue(groundTextureArray);
+                gridOnePassEffect.Parameters["TransMaskUR"]?.SetValue(groundTransitionMaskArrayUR);
+                gridOnePassEffect.Parameters["TransMaskUC"]?.SetValue(groundTransitionMaskArrayUC);
+                gridOnePassEffect.Parameters["TransMaskUL"]?.SetValue(groundTransitionMaskArrayUL);
+                gridOnePassEffect.Parameters["MaskUVOffsetLL"]?.SetValue(MaskUVOffsetLL);
+                gridOnePassEffect.Parameters["MaskUVOffsetLC"]?.SetValue(MaskUVOffsetLC);
+                gridOnePassEffect.Parameters["MaskUVOffsetLR"]?.SetValue(MaskUVOffsetLR);
+                gridOnePassEffect.CurrentTechnique.Passes[0].Apply();
 
                 device.SamplerStates[0] = new SamplerState
                 {
@@ -291,13 +372,238 @@ namespace AWEngine
                 };
 
                 var primitivesPerHex = PrimitivesPerHex;
-                device.DrawUserPrimitives(PrimitiveType.TriangleList, gridVertexData, 0, (int)(hexCount * primitivesPerHex));
+                device.DrawUserPrimitives(PrimitiveType.TriangleList, gridVertexDataOnePass, 0, (int)(hexCount * primitivesPerHex));
+            }
+        }
+
+        public void RenderGridSimple(WorldMap map)
+        {
+            // Collect all the tiles we need to render
+            var visRect = GetVisibilityRect(CurrentCamera);
+
+            var tilesToRender = map.GetTilesInRectangle(visRect);
+            var verticesPerHex = VerticesPerHex;
+            var hexCount = tilesToRender.Count();
+            var requiredLength = hexCount * verticesPerHex;
+
+            if (hexCount > 0)
+            {
+                // Create new vertex data buffer if existing one isn't large enough
+                if (gridVertexDataSimple == null || gridVertexDataSimple.LongLength < requiredLength)
+                    gridVertexDataSimple = new GridVertexSimple[(long)(requiredLength * BufferOversizeFactor)];
+                if (tileRefCache == null || tileRefCache.LongLength < requiredLength)
+                    tileRefCache = new TileRef[(long)(hexCount * BufferOversizeFactor)];
+                if (tileTransitionDrawCache == null || tileTransitionDrawCache.LongLength < requiredLength)
+                    tileTransitionDrawCache = new TileTransitionDraw[(long)(hexCount * BufferOversizeFactor)];
+
+                // Copy tiles to render into buffer
+                int i = 0;
+                foreach (var tile in tilesToRender)
+                {
+                    tileRefCache[i] = tile;
+                    ++i;
+                }
+
+                // Sort tiles by y-position
+                Array.Sort(tileRefCache, 0, hexCount, tileComparer);
+
+                // Compute tile transitions
+                int tilesWithTransitionsCount = 0;
+                int transitionCount = 0;
+                for (i = 0; i < hexCount; ++i)
+                {
+                    var tile = tileRefCache[i];
+
+                    var tileTransition = new TileTransitionDraw()
+                    {
+                        BaseTile = tile,
+                        TileUR = tile.GetTileInDirection(WorldDirection.NorthEast),
+                        TileUC = tile.GetTileInDirection(WorldDirection.North),
+                        TileUL = tile.GetTileInDirection(WorldDirection.NorthWest),
+                        DrawFlags = 0
+                    };
+
+                    if (tile.Id != tileTransition.TileUR.Id)
+                        tileTransition.DrawFlags |= TileTransitionDraw.DrawFlagUR;
+                    if (tile.Id != tileTransition.TileUC.Id)
+                        tileTransition.DrawFlags |= TileTransitionDraw.DrawFlagUC;
+                    if (tile.Id != tileTransition.TileUL.Id)
+                        tileTransition.DrawFlags |= TileTransitionDraw.DrawFlagUL;
+
+                    if (tileTransition.DrawFlags != 0)
+                    {
+                        tileTransitionDrawCache[tilesWithTransitionsCount] = tileTransition;
+                        ++tilesWithTransitionsCount;
+                        transitionCount += 3;
+                    }
+                }
+
+                // Compute offsets of the corner vertices of the tile
+                var tileSize = map.TileSize;
+                tileVertexOffsets[0] = Vector3.Zero;
+                tileVertexOffsets[1] = new Vector3(tileSize, -tileSize, 0f);
+                tileVertexOffsets[2] = new Vector3(2 * tileSize, -tileSize, 0f);
+                tileVertexOffsets[3] = new Vector3(3 * tileSize, 0f, 0f);
+                tileVertexOffsets[4] = new Vector3(2 * tileSize, tileSize, 0f);
+                tileVertexOffsets[5] = new Vector3(tileSize, tileSize, 0f);
+                tileVertexOffsets[6] = tileVertexOffsets[0];
+
+                for (i = 0; i < tileVertexOffsets.Length; ++i)
+                {
+                    tileVertexMaskUVs[i].X = ((tileVertexOffsets[i].X - 1.5f * tileSize) / (groundTransitionMaskArrayUR.Width / 2)) / 2f + 0.5f;
+                    tileVertexMaskUVs[i].Y = ((tileVertexOffsets[i].Y) / (groundTransitionMaskArrayUR.Height / 2)) / 2f + 0.5f;
+                }
+
+                // Write hexes into the temporary vertex data buffer
+                long vertLocation = 0;
+                for (i = 0; i < hexCount; ++i)
+                {
+                    var tile = tileRefCache[i];
+
+                    var center = new Vector3(tile.Center, 0f);
+                    var left = new Vector3(tile.Left, 0f);
+
+                    var colorData = new Color(tile.Id, (byte)0, (byte)0, (byte)0);
+
+                    for (int iTriangle = 0; iTriangle < TileVerts; ++iTriangle)
+                    {
+                        var v1 = left + tileVertexOffsets[iTriangle + 1];
+                        var v2 = left + tileVertexOffsets[iTriangle];
+
+                        gridVertexDataSimple[vertLocation].Position = v2;
+                        gridVertexDataSimple[vertLocation].ByteData = colorData;
+
+                        ++vertLocation;
+
+                        gridVertexDataSimple[vertLocation].Position = v1;
+                        gridVertexDataSimple[vertLocation].ByteData = colorData;
+
+                        ++vertLocation;
+
+                        gridVertexDataSimple[vertLocation].Position = center;
+                        gridVertexDataSimple[vertLocation].ByteData = colorData;
+
+                        ++vertLocation;
+                    }
+                }
+
+                Matrix View = Matrix.CreateTranslation(new Vector3(-CurrentCamera.Position, 0f));
+                Matrix Proj = GetProjection(CurrentCamera);
+                View = Matrix.Transpose(View);
+
+                gridSimpleEffect.Parameters["View"].SetValue(View);
+                gridSimpleEffect.Parameters["Projection"].SetValue(Proj);
+                gridSimpleEffect.Parameters["TextureSize"].SetValue(new Vector3(groundTextureArray.Width,
+                    groundTextureArray.Height,
+                    groundTextureArray.Depth));
+                gridSimpleEffect.Parameters["GroundSampler"]?.SetValue(groundTextureArray);
+                gridSimpleEffect.Parameters["TransMaskURCount"].SetValue((float)TransitionURCount);
+                gridSimpleEffect.Parameters["TransMaskUCCount"].SetValue((float)TransitionUCCount);
+                gridSimpleEffect.Parameters["TransMaskULCount"].SetValue((float)TransitionULCount);
+                gridSimpleEffect.Parameters["TransMaskUR"]?.SetValue(groundTransitionMaskArrayUR);
+                gridSimpleEffect.Parameters["TransMaskUC"]?.SetValue(groundTransitionMaskArrayUC);
+                gridSimpleEffect.Parameters["TransMaskUL"]?.SetValue(groundTransitionMaskArrayUL);
+                gridSimpleEffect.Parameters["MaskUVOffset"]?.SetValue(MaskOffset);
+
+                device.SamplerStates[0] = new SamplerState
+                {
+                    Filter = TextureFilter.Point,
+                    AddressU = TextureAddressMode.Wrap,
+                    AddressV = TextureAddressMode.Wrap,
+                    AddressW = TextureAddressMode.Clamp
+                };
+
+                device.BlendState = BlendState.Opaque;
+                gridSimpleEffect.CurrentTechnique.Passes[0].Apply();
+
+                var primitivesPerHex = PrimitivesPerHex;
+                device.DrawUserPrimitives(PrimitiveType.TriangleList, gridVertexDataSimple, 0, (int)(hexCount * primitivesPerHex));
+
+                // Draw tile transitions
+                long transitionHexesCount = tilesWithTransitionsCount + transitionCount;
+                long transitionDataSize = transitionHexesCount * VerticesPerHex;
+                if (gridVertexDataTransition == null || gridVertexDataTransition.Length < transitionDataSize)
+                    gridVertexDataTransition = new GridVertexSimpleAux[(long)(transitionDataSize * BufferOversizeFactor)];
+
+                transitionHexPositionOffsets[0] = Vector3.Zero;
+                transitionHexPositionOffsets[1] = new Vector3(tileSize * 2.0f, -tileSize, 0); // UR
+                transitionHexPositionOffsets[2] = new Vector3(0, -tileSize * 2.0f, 0); // UC
+                transitionHexPositionOffsets[3] = new Vector3(-tileSize * 2.0f, -tileSize, 0); // UL
+
+                transitionHexDrawFlags[0] = (byte)(TileTransitionDraw.DrawFlagUR | TileTransitionDraw.DrawFlagUC | TileTransitionDraw.DrawFlagUL);
+                transitionHexDrawFlags[1] = TileTransitionDraw.DrawFlagUR;
+                transitionHexDrawFlags[2] = TileTransitionDraw.DrawFlagUC;
+                transitionHexDrawFlags[3] = TileTransitionDraw.DrawFlagUL;
+
+                Vector2 centerMaskUV = new Vector2(.5f, .5f);
+
+                vertLocation = 0;
+                for (i = 0; i < tilesWithTransitionsCount; ++i)
+                {
+                    var tileDraw = tileTransitionDrawCache[i];
+                    var tilebase = tileDraw.BaseTile;
+
+                    var colorData = new Color(tilebase.Id, tilebase.Id, tilebase.Id, (byte)0);
+                    var maskData = new Color(tilebase.TransitionUR, tilebase.TransitionUC, tilebase.TransitionUL, (byte)0);
+
+                    tileRefsTemp[0] = tileDraw.BaseTile;
+                    tileRefsTemp[1] = tileDraw.TileUR;
+                    tileRefsTemp[2] = tileDraw.TileUC;
+                    tileRefsTemp[3] = tileDraw.TileUL;
+
+                    for (int iHex = 0; iHex < 4; ++iHex)
+                    {
+                        var tile = tileRefsTemp[iHex];
+
+                        var vertOffset = transitionHexPositionOffsets[iHex];
+                        var uvOffset = new Vector2(vertOffset.X / groundTransitionMaskArrayUC.Width,
+                            vertOffset.Y / groundTransitionMaskArrayUC.Height);
+
+                        var center = new Vector3(tile.Center, 0f);
+                        var left = new Vector3(tile.Left, 0f);
+
+                        for (int iTriangle = 0; iTriangle < TileVerts; ++iTriangle)
+                        {
+                            var v1 = left + tileVertexOffsets[iTriangle + 1];
+                            var v2 = left + tileVertexOffsets[iTriangle];
+                            var v1_uv = tileVertexMaskUVs[iTriangle + 1] + uvOffset;
+                            var v2_uv = tileVertexMaskUVs[iTriangle] + uvOffset;
+                            var center_uv = centerMaskUV + uvOffset;
+
+                            gridVertexDataTransition[vertLocation].Position = v2;
+                            gridVertexDataTransition[vertLocation].ByteData = colorData;
+                            gridVertexDataTransition[vertLocation].MaskUV = v2_uv;
+                            gridVertexDataTransition[vertLocation].Aux1 = maskData;
+
+                            ++vertLocation;
+
+                            gridVertexDataTransition[vertLocation].Position = v1;
+                            gridVertexDataTransition[vertLocation].ByteData = colorData;
+                            gridVertexDataTransition[vertLocation].MaskUV = v1_uv;
+                            gridVertexDataTransition[vertLocation].Aux1 = maskData;
+
+                            ++vertLocation;
+
+                            gridVertexDataTransition[vertLocation].Position = center;
+                            gridVertexDataTransition[vertLocation].ByteData = colorData;
+                            gridVertexDataTransition[vertLocation].MaskUV = center_uv;
+                            gridVertexDataTransition[vertLocation].Aux1 = maskData;
+
+                            ++vertLocation;
+                        }
+                    }
+                }
+
+                gridSimpleEffect.CurrentTechnique.Passes[1].Apply();
+                device.BlendState = BlendState.NonPremultiplied;
+                device.DrawUserPrimitives(PrimitiveType.TriangleList, gridVertexDataTransition, 0, (int)(transitionHexesCount * primitivesPerHex));
             }
         }
 
         public void Render(WorldMap map)
         {
-            RenderGrid(map);
+            // RenderGridOnePass(map);
+            RenderGridSimple(map);
         }
     }
 }

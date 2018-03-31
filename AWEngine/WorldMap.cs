@@ -128,6 +128,11 @@ namespace AWEngine
         {
             return new Position { X = p1.X + p2.Width, Y = p1.Y + p2.Height };
         }
+
+        public override string ToString()
+        {
+            return $"({X}, {Y})";
+        }
     }
 
     public enum WorldDirection
@@ -228,6 +233,14 @@ namespace AWEngine
         public Vector2 Left { get { return map.GetTileLeft(Position); } }
         public Vector2 Center { get { return map.GetTileCenter(Position); } }
 
+        public Position LeftUnscaled
+        {
+            get
+            {
+                return new Position(Position.X * 2, Position.Y * 2 + (Position.X & 1));
+            }
+        }
+
         public TileRef(WorldMap map, WorldRegion region, Position position)
         {
             this.map = map;
@@ -278,6 +291,11 @@ namespace AWEngine
                 new Position(1, 1)
             }
         };
+
+        public override string ToString()
+        {
+            return Position.ToString();
+        }
     }
 
     public class WorldMap

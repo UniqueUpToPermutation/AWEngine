@@ -131,7 +131,8 @@
     <None Include="app.manifest" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Content\Effects\Grid.fx" />
+    <Content Include="Content\Effects\GridOnePass.fx" />
+    <Content Include="Content\Effects\GridSimple.fx" />
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include="Microsoft.Net.Framework.3.5.SP1">
