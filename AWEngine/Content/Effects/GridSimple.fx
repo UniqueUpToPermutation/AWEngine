@@ -123,16 +123,17 @@ PixelShaderOutput PixelShaderTransitionPass(VertexShaderOutputMaskUV input)
 	uvwUC = float3(input.MaskUV, input.MaskIds.g);
 	uvwUL = float3(input.MaskUV, input.MaskIds.b);
 	
-	float maskUR = tex3D(TransMaskUR, uvwUR).r;
-	float maskUC = tex3D(TransMaskUC, uvwUC).r;
-	float maskUL = tex3D(TransMaskUL, uvwUL).r;
+	float aUR = tex3D(TransMaskUR, uvwUR).r;
+	float aUC = tex3D(TransMaskUC, uvwUC).r;
+	float aUL = tex3D(TransMaskUL, uvwUL).r;
 
-	float alpha = min(1, maskUR + maskUC + maskUL);
-	output.Color = colorUC;
+	float alpha = min(1, aUR + aUC + aUL);
+
+	float4 color = (1 - aUC) * ((1 - aUR) *  colorUL + aUR * colorUR) + aUC * colorUC;
+
+	output.Color.rgb = color.rgb;
 	output.Color.a = alpha;
-	// output.Color.rgb = colorUC.rgb;
-	//output.Color = colorUR;
-	//output.Color.a = alpha;
+
 	return output;
 }
 

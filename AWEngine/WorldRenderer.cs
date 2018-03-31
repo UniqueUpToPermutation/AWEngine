@@ -93,7 +93,10 @@ namespace AWEngine
         // Call CaseInsensitiveComparer.Compare with the parameters reversed.
         public int Compare(TileRef A, TileRef B)
         {
-            return A.LeftUnscaled.Y - B.LeftUnscaled.Y;
+            var diff = A.LeftUnscaled.Y - B.LeftUnscaled.Y;
+            if (diff == 0)
+                return A.LeftUnscaled.X - B.LeftUnscaled.X;
+            return diff;
         }
     }
 
